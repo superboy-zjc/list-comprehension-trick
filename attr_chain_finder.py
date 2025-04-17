@@ -1,22 +1,3 @@
-# import os
-
-# def clear_builtin_function(bultins: dict):
-#   input = bultins.copy()
-#   for key in list(input.keys()):
-#     if type(input[key]).__name__ == 'builtin_function_or_method':
-#       del input[key]
-#     elif "class" in str(type(input[key])) and type(input[key]).__module__ == 'builtins':
-#       del input[key]
-#     elif type(input[key]).__name__ == 'type' and input[key].__module__ == 'builtins':
-#       del input[key]
-#     elif type(input[key]).__name__ == 'str':
-#       del input[key]
-#   return input
-
-#   a = clear_builtin_function(__builtins__)
-#   b = __builtins__
-#   print(a)
-
 """
   Gadget Chain Finder
     Given a target object, find the chain of attribute/item access to reach it
@@ -53,7 +34,7 @@ def is_function_or_c_impl(obj):
     return True
   return False
 
-def sys_finder(to_check, to_match, walked=None, sys_matches=None, mode="id", underscope=True):
+def sys_finder(to_check, to_match, walked=None, sys_matches=None, mode="id", underscope=True, key_mode="all"):
   """
     To identify a chain of path towards target object, we have to enumerate each object to find the chain
     For every object, the chain can be from 
@@ -64,6 +45,10 @@ def sys_finder(to_check, to_match, walked=None, sys_matches=None, mode="id", und
         "id": in this mode, `to_match` is the `object id, e.x. id(TARGET)` that chained targets own as its attribute
         "attr_name": in this mode, `to_match` is `string` which is part of the attribute name that chained targets own
         TODO: "class-instance": in this mode, `to_match` is the class type that is the type of chained targets
+      key_mode:
+        "all": getattr / getitem
+        "getattr": getattr only
+        "getitem": getitem only
   """
   def _extend(a, b):
     a_ = a.copy()
@@ -73,44 +58,48 @@ def sys_finder(to_check, to_match, walked=None, sys_matches=None, mode="id", und
     a_ = a.copy()
     a_.append(b)
     return a_
-  def _check_attr(nodes):
+  def _check_attr(nodes, key_mode="all"):
     for attr_name in nodes:
       # check underscope mode; pass the attribute that starts with UNDERSCOPE
       if underscope == False and attr_name.startswith(UNDERSCOPE):
         continue
       try:
         attr = getattr(to_check, attr_name)
-        if isinstance(attr, (list, tuple, set, deque, frozenset, range, slice)):
+        if isinstance(attr, (list, tuple, set, deque, frozenset, range, slice)) and key_mode != "getattr":
           for id, item in enumerate(attr):
-            sys_finder(item, to_match, walked, _extend(sys_matches, ["."+attr_name, "["+str(id)+"]"]), mode, underscope)
-        elif isinstance(attr, dict):
+            sys_finder(item, to_match, walked, _extend(sys_matches, ["."+attr_name, "["+str(id)+"]"]), mode, underscope, key_mode)
+        elif isinstance(attr, dict) and key_mode != "getattr":
           for key, value in attr.items():
-            sys_finder(value, to_match, walked, _extend(sys_matches, ["."+attr_name, "['"+str(key)+"']"]), mode, underscope)
+            sys_finder(value, to_match, walked, _extend(sys_matches, ["."+attr_name, "['"+str(key)+"']"]), mode, underscope, key_mode)
         else:
-          sys_finder(attr, to_match, walked, _append(sys_matches, "."+attr_name), mode, underscope)
+          sys_finder(attr, to_match, walked, _append(sys_matches, "."+attr_name), mode, underscope, key_mode)
       except Exception as e:
         _print_debug(e)
         continue
       
-  def _check_item(nodes):
+  def _check_item(nodes, key_mode="all"):
+    if key_mode == "getattr":
+      return
     for p_id, p_item in enumerate(nodes):
       try:
         if isinstance(p_item, (list, tuple, set, deque, frozenset, range, slice)):
           for id, item in enumerate(p_item):
-            sys_finder(item, to_match, walked, _extend(sys_matches, ["["+str(p_id)+"]", "["+str(id)+"]"]), mode, underscope)
+            sys_finder(item, to_match, walked, _extend(sys_matches, ["["+str(p_id)+"]", "["+str(id)+"]"]), mode, underscope, key_mode)
         elif isinstance(p_item, dict):
           for key, value in p_item.items():
             # check underscope mode
             if underscope == False and str(key).startswith(UNDERSCOPE):
               continue
-            sys_finder(value, to_match, walked, _extend(sys_matches, ["["+str(p_id)+"]", "['"+str(key)+"']"]), mode, underscope)
+            sys_finder(value, to_match, walked, _extend(sys_matches, ["["+str(p_id)+"]", "['"+str(key)+"']"]), mode, underscope, key_mode)
         else:
-          sys_finder(p_item, to_match, walked, _append(sys_matches, "["+str(p_id)+"]"), mode, underscope)
+          sys_finder(p_item, to_match, walked, _append(sys_matches, "["+str(p_id)+"]"), mode, underscope, key_mode)
       except Exception as e:
         _print_debug(e)
         continue
   
-  def _check_dict(nodes):
+  def _check_dict(nodes, key_mode="all"):
+    if key_mode == "getattr":
+      return
     for p_key, p_value in nodes.items():
       # check underscope mode
       if underscope == False and str(p_key).startswith(UNDERSCOPE):
@@ -118,15 +107,15 @@ def sys_finder(to_check, to_match, walked=None, sys_matches=None, mode="id", und
       try:
         if isinstance(p_value, (list, tuple, set, deque, frozenset, range, slice)):
           for id, item in enumerate(p_value):
-            sys_finder(item, to_match, walked, _extend(sys_matches, ["['"+str(p_key)+"']", "["+str(id)+"]"]), mode, underscope)
+            sys_finder(item, to_match, walked, _extend(sys_matches, ["['"+str(p_key)+"']", "["+str(id)+"]"]), mode, underscope, key_mode)
         elif isinstance(p_value, dict):
           for key, value in p_value.items():
             # check underscope mode
             if underscope == False and str(key).startswith(UNDERSCOPE):
               continue
-            sys_finder(value, to_match, walked, _extend(sys_matches, ["['"+str(p_key)+"']", "['"+str(key)+"']"]), mode, underscope)
+            sys_finder(value, to_match, walked, _extend(sys_matches, ["['"+str(p_key)+"']", "['"+str(key)+"']"]), mode, underscope, key_mode)
         else:
-          sys_finder(p_value, to_match, walked, _append(sys_matches, "['"+str(p_key)+"']"), mode, underscope)
+          sys_finder(p_value, to_match, walked, _append(sys_matches, "['"+str(p_key)+"']"), mode, underscope, key_mode)
       except Exception as e:
         _print_debug(e)
         continue
@@ -188,6 +177,7 @@ def sys_finder(to_check, to_match, walked=None, sys_matches=None, mode="id", und
   # primitive types: int, float, str, bool, NoneType, bytes, complex
   # C-implemented types (fixed layout): list, tuple, set, dict, deque, frozenset, range, slice
   # don't have __dict__
+  # TODO: add __annotations__ check
   if hasattr(to_check, '__globals__'):
     nodes = to_check.__globals__
     try:
@@ -198,25 +188,25 @@ def sys_finder(to_check, to_match, walked=None, sys_matches=None, mode="id", und
       return
     walked_globals.add(nodes["__file__"])
     sys_matches.append(".__globals__")
-    _check_dict(nodes)
+    _check_dict(nodes, key_mode)
   # TODO: we can replace the following two elifs with isinstance(to_check, (Mapping, Sequence))
   # However, tradeoff is for those user defined Mapping, Sequences, the user defined attributes would be missed
   elif not hasattr(to_check, '__dict__') and isinstance(to_check, (dict,)):
     nodes = to_check
-    _check_dict(nodes)
+    _check_dict(nodes, key_mode)
   elif not hasattr(to_check, '__dict__') and isinstance(to_check, (list, tuple, set, deque, frozenset, range, slice)):
     nodes = to_check
-    _check_item(nodes)
+    _check_item(nodes, key_mode)
   else:
     # Collect attribute keys from the object. From object, its type class or both.
     nodes = _collect_attr_keys(to_check)
     if not nodes:
       return
-    _check_attr(nodes)
+    _check_attr(nodes, key_mode)
 
 def single_find(module, name):
     try:
-      sys_finder(module, to_match=name, walked=set(), sys_matches=[module.__name__], mode="attr_name", underscope=False)
+      sys_finder(module, to_match=name, walked=set(), sys_matches=[module.__name__], mode="attr_name", underscope=False, key_mode="all")
     except AttributeError as e:
       print(e)
       pass
@@ -228,7 +218,7 @@ def single_find_sensitive_id(module):
       import traceback
       to_find = [sys, os, system, traceback]
       for item in to_find:
-        sys_finder(module, to_match=id(item), walked=set(), sys_matches=[], mode="id", underscope=False)
+        sys_finder(module, to_match=id(item), walked=set(), sys_matches=[], mode="id", underscope=False, key_mode="all")
     except AttributeError as e:
       print(e)
       pass
